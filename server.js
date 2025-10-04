@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 
-const app = express();
+ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
@@ -15,9 +15,10 @@ const io = socketIo(server, {
   }
 });
 
-// Middleware
+// ✅ Add CORS middleware here
+const cors = require("cors");
 app.use(cors());
-app.use(express.json());
+
 // Serve static files from the 'public' directory
 app.use(express.static(path.join(__dirname, '../frontend')));
 
@@ -222,4 +223,5 @@ function getMimeType(filePath) {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
