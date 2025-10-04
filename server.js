@@ -217,9 +217,9 @@ function getMimeType(filePath) {
 
   return mimeTypes[ext] || 'application/octet-stream';
 }
-
  const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
