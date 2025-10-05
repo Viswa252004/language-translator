@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -771,6 +771,11 @@
 <div class="notification" id="notification"></div>
 
 <script>
+    // ==========================================================
+    // == FIX #1: Define your backend URL in one place. ==
+    // ==========================================================
+    const BACKEND_URL = "https://language-translator-qgsd.onrender.com";
+
     document.addEventListener('DOMContentLoaded', () => {
         // DOM Elements
         const homePage = document.getElementById('homePage');
@@ -817,8 +822,10 @@
 
         const notification = document.getElementById('notification');
 
-        // Initialize Socket.IO
-        const socket = io();
+        // ==========================================================
+        // == FIX #2: Point Socket.IO to your backend URL. ==
+        // ==========================================================
+        const socket = io(BACKEND_URL);
 
         // State
         let selectedFile = null;
@@ -1034,12 +1041,13 @@
             formData.append('file', selectedFile);
 
             // Upload the file to the server
-           const API_URL = "https://language-translator-qgsd.onrender.com"; // your backend URL
-
-fetch(`${API_URL}/api/upload`, {
-    method: 'POST',
-    body: formData
-})
+            // ==========================================================
+            // == FIX #3: Use the BACKEND_URL variable for the fetch call. ==
+            // ==========================================================
+            fetch(`${BACKEND_URL}/api/upload`, {
+                method: 'POST',
+                body: formData
+            })
 
             .then(response => {
                 if (!response.ok) {
