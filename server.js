@@ -15,8 +15,10 @@ const io = socketIo(server, {
   }
 });
 
-// ✅ Add CORS middleware here
+ const express = require("express");
 const cors = require("cors");
+
+const app = express();
 app.use(cors());
 
 // Serve static files from the 'public' directory
@@ -223,5 +225,6 @@ function getMimeType(filePath) {
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
