@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const multer = require('multer');
@@ -6,32 +6,34 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 
- // server.js
-
-const express = require("express");
-const cors = require("cors");
-const bodyParser = require("body-parser");
-
 const app = express();
+const server = http.createServer(app); // Create an HTTP server
+const io = socketIo(server, { // Attach Socket.IO to the server
+  cors: {
+    origin: "*", // For development. In production, specify your frontend's URL.
+    methods: ["GET", "POST"]
+  }
+});
+
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
-app.use(bodyParser.json());
+app.use(cors()); // Enable CORS for all routes
+app.use(express.json()); // Use express.json() instead of bodyParser.json()
+app.use(express.urlencoded({ extended: true })); // To handle form data
+
+// --- API Routes ---
 
 // Example test route
 app.get("/", (req, res) => {
   res.send("Server is running 🚀");
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Serve static files from the 'public' directory (if needed)
+// app.use(express.static(path.join(__dirname, '../frontend')));
 
 
-// Serve static files from the 'public' directory
-app.use(express.static(path.join(__dirname, '../frontend')));
+// --- File Upload Logic ---
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -45,7 +47,6 @@ const storage = multer.diskStorage({
     cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    // Generate a unique ID for the file
     const uniqueId = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, `${uniqueId}-${file.originalname}`);
   }
@@ -57,7 +58,7 @@ const upload = multer({ storage });
 const rooms = {};
 const activeTransfers = {};
 
-// Routes
+// Route for uploading a file
 app.post('/api/upload', upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -75,42 +76,33 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   res.json({ success: true, fileInfo });
 });
 
-// Socket.IO for real-time file transfer
+
+// --- Socket.IO Logic for Real-time Transfer ---
+
 io.on('connection', (socket) => {
   console.log('New client connected:', socket.id);
 
-  // Handle joining a room
   socket.on('join-room', (roomId) => {
     socket.join(roomId);
     console.log(`Client ${socket.id} joined room: ${roomId}`);
 
-    // Initialize room if it doesn't exist
     if (!rooms[roomId]) {
-      rooms[roomId] = {
-        sender: null,
-        receiver: null,
-        fileId: null
-      };
+      rooms[roomId] = { sender: null, receiver: null, fileId: null };
     }
 
-    // Determine role based on who's already in the room
     if (!rooms[roomId].sender) {
       rooms[roomId].sender = socket.id;
       socket.emit('room-joined', { role: 'sender', roomId });
     } else if (!rooms[roomId].receiver) {
       rooms[roomId].receiver = socket.id;
       socket.emit('room-joined', { role: 'receiver', roomId });
-
-      // Notify sender that receiver has joined
       io.to(rooms[roomId].sender).emit('user-joined', socket.id);
     } else {
-      // Room is full
       socket.emit('room-full');
       socket.leave(roomId);
     }
   });
 
-  // Handle sender starting a transfer
   socket.on('start-transfer', (data) => {
     const { fileId, receiverId } = data;
     const filePath = path.join(uploadsDir, fileId);
@@ -121,6 +113,10 @@ io.on('connection', (socket) => {
     }
 
     const stats = fs.statSync(filePath);
+    activeTransfers[socket.id] = {
+      fileId, receiverId, filePath, sentBytes: 0, totalBytes: stats.size
+    };
+
     const fileInfo = {
       id: fileId,
       name: path.basename(filePath).split('-').slice(1).join('-'),
@@ -128,52 +124,28 @@ io.on('connection', (socket) => {
       type: getMimeType(filePath)
     };
 
-    // Store transfer info
-    activeTransfers[socket.id] = {
-      fileId,
-      receiverId,
-      filePath,
-      sentBytes: 0,
-      totalBytes: stats.size
-    };
-
-    // Notify receiver
     io.to(receiverId).emit('transfer-started', fileInfo);
 
-    // Start sending file in chunks
     const readStream = fs.createReadStream(filePath);
     const chunkSize = 64 * 1024; // 64KB chunks
 
     readStream.on('data', (chunk) => {
-      // Send chunk to receiver
       io.to(receiverId).emit('file-chunk', {
         fileId,
         chunk: chunk.toString('base64'),
         progress: Math.min(100, Math.round((activeTransfers[socket.id].sentBytes / stats.size) * 100))
       });
-
       activeTransfers[socket.id].sentBytes += chunk.length;
-
-      // Update sender progress
       socket.emit('transfer-progress', {
         progress: Math.min(100, Math.round((activeTransfers[socket.id].sentBytes / stats.size) * 100))
       });
     });
 
     readStream.on('end', () => {
-      // Notify both parties that transfer is complete
       socket.emit('transfer-complete');
       io.to(receiverId).emit('transfer-complete');
-
-      // Clean up after a delay
       setTimeout(() => {
-        try {
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-          }
-        } catch (err) {
-          console.error('Error cleaning up file:', err);
-        }
+        try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch (err) { console.error('Error cleaning up file:', err); }
       }, 60000); // Delete file after 1 minute
     });
 
@@ -185,18 +157,12 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Handle disconnection
   socket.on('disconnect', () => {
     console.log('Client disconnected:', socket.id);
-
-    // Clean up any active transfers
     if (activeTransfers[socket.id]) {
-      // Notify receiver that transfer was cancelled
       io.to(activeTransfers[socket.id].receiverId).emit('transfer-cancelled');
       delete activeTransfers[socket.id];
     }
-
-    // Clean up rooms
     for (const roomId in rooms) {
       if (rooms[roomId].sender === socket.id || rooms[roomId].receiver === socket.id) {
         delete rooms[roomId];
@@ -210,31 +176,16 @@ io.on('connection', (socket) => {
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const mimeTypes = {
-    '.html': 'text/html',
-    '.js': 'text/javascript',
-    '.css': 'text/css',
-    '.json': 'application/json',
-    '.png': 'image/png',
-    '.jpg': 'image/jpg',
-    '.gif': 'image/gif',
-    '.svg': 'image/svg+xml',
-    '.wav': 'audio/wav',
-    '.mp4': 'video/mp4',
-    '.woff': 'application/font-woff',
-    '.ttf': 'application/font-ttf',
-    '.eot': 'application/vnd.ms-fontobject',
-    '.otf': 'application/font-otf',
-    '.wasm': 'application/wasm'
+    '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+    '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpg',
+    '.gif': 'image/gif', '.svg': 'image/svg+xml', '.wav': 'audio/wav',
+    '.mp4': 'video/mp4', '.woff': 'application/font-woff', '.ttf': 'application/font-ttf',
+    '.eot': 'application/vnd.ms-fontobject', '.otf': 'application/font-otf', '.wasm': 'application/wasm'
   };
-
   return mimeTypes[ext] || 'application/octet-stream';
 }
- const PORT = process.env.PORT || 3000;
 
+// Start the server
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-
-
-
